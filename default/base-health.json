@@ -1,0 +1,27 @@
+{
+  "id": "/zdd/base-health",
+  "instances": 4,
+  "cpus": 0.1,
+  "mem": 32,
+  "container": {
+    "type": "DOCKER",
+    "docker": {
+      "image": "mhausenblas/simpleservice:0.4.0",
+      "network": "HOST"
+    }
+  },
+  "env": {
+    "HEALTH_MIN": "1000",
+    "HEALTH_MAX": "5000",
+    "SIMPLE_SERVICE_VERSION": "0.9"
+  },
+  "healthChecks": [{
+    "protocol": "HTTP",
+    "path": "/health",
+    "gracePeriodSeconds": 300,
+    "intervalSeconds": 60,
+    "timeoutSeconds": 20,
+    "maxConsecutiveFailures": 3,
+    "ignoreHttp1xx": false
+  }]
+}
