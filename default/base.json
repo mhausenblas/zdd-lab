@@ -1,5 +1,5 @@
 {
-  "id": "/zdd/base-health",
+  "id": "/zdd/base",
   "instances": 4,
   "cpus": 0.1,
   "mem": 32,

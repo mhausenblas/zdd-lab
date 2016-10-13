@@ -1,6 +1,6 @@
 # Zero Downtime Deployments Lab
 
-This Zero Downtime Deployments (ZDD)lab aims at providing an introduction to DC/OS service deployments.
+This Zero Downtime Deployments (ZDD) lab aims at providing an introduction to [DC/OS](https://dcos.io/) service deployments.
 It serves as a step-wise guide how to deploy new versions of a DC/OS service without causing downtimes.
 
 We will do the following in the ZDD lab:
@@ -253,11 +253,87 @@ Recommendation: use this property only if you really need fine-grained control o
 
 ## Minimal overcapacity
 
+Using the defaults (as described in the section [default behaviour](#default-behaviour)) the DC/OS service deployments have the following implicit settings:
+
     "upgradeStrategy": {
-      "minimumHealthCapacity": 0.25,
-      "maximumOverCapacity": 0.25
-    },
-    
+      "minimumHealthCapacity": 1.0,
+      "maximumOverCapacity": 1.0
+    }
+
+In other words, the defaults of the [upgrade strategy](https://mesosphere.github.io/marathon/docs/rest-api.html#upgrade-strategy) mean that it results in a rather safe but somewhat resource-intensive upgrade.
+
+Formally, the meaning of `minimumHealthCapacity`  and `maximumOverCapacity` is as follows:
+
+- `minimumHealthCapacity` …  a floating point value between 0 and 1 (which defaults to `1`), specifying the % of instances to maintain healthy during deployment; with `0` meaning all old instances are stopped before the new version is deployed and `1` meaning all instances of the new version are deployed side by side with the old one before it is stopped.
+- `maximumOverCapacity` …  a floating point value between 0 and 1 (which defaults to `1`), specifying the max. % of instances over capacity during deployment; with `0` meaning that during the upgrade process no additional capacity than may be used for old and new instances ( only when an old version is stopped, a new instance can be deployed) and  `1` meaning that all old and new instances can co-exist during the upgrade process.
+
+Now, it's not always the case that there are sufficient spare capacities in the DC/OS cluster available. To carry out a deployment that uses minimal overcapacity, we could do the following:
+
+    {
+      "id": "/zdd/base-min-over",
+      "instances": 4,
+      "cpus": 0.1,
+      "mem": 32,
+      "container": {
+        "type": "DOCKER",
+        "docker": {
+          "image": "mhausenblas/simpleservice:0.4.0",
+          "network": "HOST"
+        }
+      },
+      "env": {
+        "HEALTH_MIN": "1000",
+        "HEALTH_MAX": "5000",
+        "SIMPLE_SERVICE_VERSION": "0.9"
+      },
+      "healthChecks": [{
+        "protocol": "HTTP",
+        "path": "/health",
+        "gracePeriodSeconds": 300,
+        "intervalSeconds": 60,
+        "timeoutSeconds": 20,
+        "maxConsecutiveFailures": 3,
+        "ignoreHttp1xx": false
+      }],
+      "upgradeStrategy": {
+        "minimumHealthCapacity": 0.25,
+        "maximumOverCapacity": 0.25
+      }
+    }
+
+In above example, notice the `"minimumHealthCapacity": 0.25` and `"maximumOverCapacity": 0.25`. 
+Let's now have a look at how this might play out, step-by-step, when we simulate the upgrade to 
+version `1.0` by changing `SIMPLE_SERVICE_VERSION` to `1.0`:
+
+```
+T0:    [0.9] [0.9] [0.9] [0.9]      
+                                    
+T1:    deployment kicks off         
+                                    
+T2:    [0.9] [0.9] [0.9] [0.9] [1.0]
+                         |          
+T3:    [0.9] [0.9] [0.9] [1.0] [1.0]
+                   |                
+T4:    [0.9] [0.9] [1.0] [1.0] [1.0]
+             |                      
+T5:    [0.9] [1.0] [1.0] [1.0] [1.0]
+        |                           
+T6:    [1.0] [1.0] [1.0] [1.0]      
+                                    
+T7:    deployment done              
+```
+
+A `minimumHealthCapacity` of `0.25` means that 25% or exactly one instance (in our case, since we have specified 4) always needs to run on a certain version. I other words, at no time in the deployment can the app have less than one instance running with any given version, say, `0.9`. 
+
+Up to and incl. timepoint `T0` the current version of the app was `0.9`. When the deployment kicks off at timepoint `T1` the `maximumOverCapacity` attribute becomes important: since we've set it to `0.25`  it means no more than 25% (or: exactly one instance in our case) can be run in addition to the already running instances. In other words: with this setting, no more than 5 instances of the app (in whatever version they might be in) can ever run at the same time.
+
+At `T2` one instance at version `1.0` comes up, satisfying both capacity requirements; in the DC/OS UI this would, for example, look something like the following (note that when you look at the right-most `VERSION` column you see 4 instances with `10/13/2016, 1:36:22 PM` which corresponds to the `0.9` service version and 1 instance with `10/13/2016, 1:36:48 PM`, corresponding to `1.0`):
+
+![simpleservice with minimal overcapacity](img/base-min-over-step.png)
+
+At `T3`, one `0.9` instance is stopped and replaced by a `1.0` instance; at `T4` the same happens again and with the `T5-T6` transition the last remaining `0.9` instance is stopped and since we now have 4 instances of `1.0` running all is good and as expected at `T7`.
+
+Lesson learned: certain combinations of `minimumHealthCapacity` and `maximumOverCapacity` make sense while others are not satisfiable, meaning that you can specify them, just the deployment will never be carried out. For example, a `"minimumHealthCapacity": 0.5` and `"maximumOverCapacity": 0.1` would be unsatisfiable, since you want to keep at least half of your instances around but only allow 10% overcapacity. To make this latter deployment satisfiable you'd need to change it to `"maximumOverCapacity": 0.5`.
 
 ## Canary deployment
 
