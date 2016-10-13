@@ -8,21 +8,27 @@ We will do the following in the ZDD lab:
 1. A rolling upgrade using the [default behaviour](#default-behaviour)
   1. [Without health checks](#without-health-checks)
   1. [With health checks](#with-health-checks)
-  1. [With readiness checks](#without-readiness-checks)
+  1. [With readiness checks](#with-readiness-checks)
 1. A rolling upgrade with [minimal overcapacity](#minimal-overcapacity)
 1. A [canary deployment](#canary-deployment)
 1. A [Blue-Green deployment](#blue-green-deployment)
 
-Throughout the ZDD lab we will be using [simpleservice](https://github.com/mhausenblas/simpleservice) that 
-allows us to simulate certain behaviour incl. versions and health checks.
+## Preparation
 
-Prerequisites for this lab are:
+Throughout the ZDD lab we will be using [simpleservice](https://github.com/mhausenblas/simpleservice), a
+simple test service, allowing us to simulate certain behaviour such as reporting a certain version and health check delays.
+
+If you want to follow along and try out the described steps yourself, here are the prerequisites:
 
 - A running [DC/OS 1.8](https://dcos.io/releases/1.8.4/) cluster with at least one private agent, see also [installation](https://dcos.io/install/) if you don't have one yet.
 - The [DC/OS CLI](https://dcos.io/docs/1.8/usage/cli/) installed and configured. 
 - The [jq](https://stedolan.github.io/jq/) tool, command-line JSON processor, installed.
 
-I'd also suggest that as a preparation you have a look at the [health checks](https://mesosphere.github.io/marathon/docs/health-checks.html) and [readiness checks](https://mesosphere.github.io/marathon/docs/readiness-checks.html) docs.
+Finally, as a preparation you should have a (quick) look at the following docs:
+
+- [health checks](https://mesosphere.github.io/marathon/docs/health-checks.html)
+- [deployments](https://mesosphere.github.io/marathon/docs/deployments.html)
+- and optionally [readiness checks](https://mesosphere.github.io/marathon/docs/readiness-checks.html)
 
 ## Default behaviour
 
