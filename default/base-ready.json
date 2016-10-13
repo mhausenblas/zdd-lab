@@ -1,0 +1,33 @@
+{
+  "id": "/zdd/base-ready",
+  "instances": 4,
+  "cpus": 0.1,
+  "mem": 32,
+  "container": {
+    "type": "DOCKER",
+    "docker": {
+      "image": "mhausenblas/simpleservice:0.4.0",
+      "network": "HOST"
+    }
+  },
+  "env": {
+    "HEALTH_MIN": "1000",
+    "HEALTH_MAX": "5000",
+    "SIMPLE_SERVICE_VERSION": "0.9"
+  },
+  "portDefinitions": [{
+    "protocol": "tcp",
+    "name": "main-api",
+    "port": 0
+  }],
+  "readinessChecks": [{
+    "protocol": "HTTP",
+    "path": "/health",
+    "portName": "main-api",
+    "intervalSeconds": 30,
+    "timeoutSeconds": 10,
+    "httpStatusCodesForReady": [
+      200
+    ]
+  }]
+}

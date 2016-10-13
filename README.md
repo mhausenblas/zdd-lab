@@ -5,7 +5,11 @@ It serves as a step-wise guide how to deploy new versions of a DC/OS service wit
 
 We will do the following in the ZDD lab:
 
-1. A simple rolling upgrade using the [default behaviour](#default-behaviour), without and with health checks
+1. A rolling upgrade using the [default behaviour](#default-behaviour)
+  1. [Without health checks](#without-health-checks)
+  1. [With health checks](#with-health-checks)
+  1. [With readiness checks](#without-readiness-checks)
+1. A rolling upgrade with [minimal overcapacity](#minimal-overcapacity)
 1. A [canary deployment](#canary-deployment)
 1. A [Blue-Green deployment](#blue-green-deployment)
 
@@ -21,6 +25,11 @@ Prerequisites for this lab are:
 I'd also suggest that as a preparation you have a look at the [health checks](https://mesosphere.github.io/marathon/docs/health-checks.html) and [readiness checks](https://mesosphere.github.io/marathon/docs/readiness-checks.html) docs.
 
 ## Default behaviour
+
+The default behaviour of DC/OS service deployments is a rolling upgrade, that is, DC/OS launches instances of the
+new version of your service while shutting down (killing) instances with the old version. How exactly this takes place
+depends on how much information (about the status of your service) you provide to DC/OS. This status info is called health 
+and readiness checks in DC/OS and in the following we will walk through each of the basic cases.
 
 ### Without health checks
 
@@ -99,6 +108,8 @@ Notice the old (`0.9`) instances being killed and the new (`1.0`) ones running, 
     {"host": "10.0.3.193:27670", "version": "1.0", "result": "all is well"}
 
 Also, notice that none of the instances in the DC/OS UI is showing healthy. This is because DC/OS doesn't know anything about the health status. Let's change that.
+
+Note also that if you only want to scale the app (keeping the same version) you can use the following CLI command: `dcos marathon app update /zdd/base instances=5` to scale to 5 instances.
 
 ### With health checks
 
@@ -207,7 +218,40 @@ Once the deployment has been kicked off, you should see a sequence like the foll
 
 Now, what happened? We requested 4 running, healthy instances of `simpleservice`. DC/OS recognizes the unhealthy instances and re-starts them until it has achieved the goal.
 
-Note also that if you only want to scale the app (keeping the same version) you can use the CLI command `dcos marathon app update /zdd/base-health instances=5` to achieve this.
+### With readiness checks
+
+So far we've been focusing on `healthChecks`, which are typically used to periodically check the health of a running service. In the deployment phase, for example, in the initial deployment or when you do a rolling upgrade via `dcos marathon app update`, there may be the need to realize when a service is ready to serve traffic. This could be the case for stateful services (a database) or if there are integration points calling out to 3rd party services such as AWS S3 or Azure Event Bus. The difference between `healthChecks` and `readinessChecks` is essentially that if a health check for a task fails, DC/OS will replace that task, whereas in the case of the readiness check failing DC/OS will wait until it succeeds before continuing with the deployment.
+
+To use a `readinessChecks` use something like shown in [base-ready.json](default/base-ready.json) (note that you MUST specify a `portDefinitions` in the spec and give it a name that you then reference in `portName`, otherwise it will not work):
+
+    $ dcos marathon app add default/base-ready.json
+    $ dcos marathon app show /zdd/base-ready | jq '.readinessChecks'
+    [
+      {
+        "httpStatusCodesForReady": [
+          200
+        ],
+        "intervalSeconds": 30,
+        "name": "readinessCheck",
+        "path": "/health",
+        "portName": "main-api",
+        "preserveLastResponse": false,
+        "protocol": "HTTP",
+        "timeoutSeconds": 10
+      }
+    ]
+
+Note that `readinessChecks` result is a global property of the service (not on a task level). Note also that it's orthogonal to the `healthChecks`, that is, `dcos marathon app show /zdd/base-ready | jq '.tasks[].healthCheckResults[]'` will return an empty result and also the DC/OS UI will only show the tasks `Running` and now `Healthy`.
+
+Recommendation: use this property only if you really need fine-grained control over the deployment process, for example, in the context of a framework scheduler.
+
+## Minimal overcapacity
+
+    "upgradeStrategy": {
+      "minimumHealthCapacity": 0.25,
+      "maximumOverCapacity": 0.25
+    },
+    
 
 ## Canary deployment
 
