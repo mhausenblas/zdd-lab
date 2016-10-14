@@ -17,7 +17,7 @@ while [  $COUNTER -lt $INVOCATIONS ]; do
   sleep .1
 done
 
-NUM_v09=`cat $RESULTFILE | grep \"1.0 | wc -l`
+NUM_v09=`cat $RESULTFILE | grep \"0.9 | wc -l`
 NUM_v10=`cat $RESULTFILE | grep \"1.0 | wc -l`
 
 echo Out of $INVOCATIONS clients of simpleservice $NUM_v09 saw version 0.9 and $NUM_v10 saw version 1.0
