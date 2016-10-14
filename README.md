@@ -28,7 +28,8 @@ Finally, as a preparation you should have a (quick) look at the following docs:
 
 - [health checks](https://mesosphere.github.io/marathon/docs/health-checks.html)
 - [deployments](https://mesosphere.github.io/marathon/docs/deployments.html)
-- and optionally [readiness checks](https://mesosphere.github.io/marathon/docs/readiness-checks.html)
+- [readiness checks](https://mesosphere.github.io/marathon/docs/readiness-checks.html) (OPTIONAL)
+- [Marathon-LB ZDD](https://github.com/mesosphere/marathon-lb#zero-downtime-deployments)
 
 ## Default behaviour
 
@@ -345,11 +346,11 @@ A recording of an example session for the above case (`/zdd/base-min-over`) is a
 
 ## Canary deployment
 
-The deployments discussed so far all allowed us to do rolling upgrades of a service without causing any downtimes. That is, at any point in time, clients of the `simpleservice` would be served with some version of the service. However, there is one drawback so far: clients of the service would potentially see different versions during the deployment in an uncontrolled manner until the point in time all new instances of the service would turn healthy.
+The deployments discussed so far all allowed us to do rolling upgrades of a service without causing any downtimes. That is, at any point in time, clients of the `simpleservice` would be served with some version of the service. However, there is one drawback with the deployments so far: clients of the service will potentially see different versions during the deployment in an uncontrolled manner until the point in time all new instances of the service would turn healthy.
 
 In a more realistic setup one would use a load balancer in front of the service instances: on the one hand, this would more evenly distribute the load amongst the service instances and on the other hand it allows us to carry out more advanced ZDD such as the one we're discussing in the following: a [canary deployment](http://martinfowler.com/bliki/CanaryRelease.html). The basic idea behind it is to expose a small fraction of the clients, say, for example 10% to a new version of the service and once you're confident it works as expected you roll out the new version to all users. If you take this a step further, for example, by having multiple versions of the service you can do also A/B testing with it.
 
-We now have a look at a canary deployment with DC/OS: we want to have four instances serving version `0.9` of `simpleservice` and one instance serving version `1.0`. In addition, we now expose the service to the outside world, that is, `simpleservice` should not only be available to clients within the DC/OS cluster but publicly available, from the wider Internet. So we aim to end up with the following situation:
+We now have a look at a canary deployment with DC/OS: we want to have 3 instances serving version `0.9` of `simpleservice` and 1 instance serving version `1.0`. In addition, we now expose the service to the outside world, that is, `simpleservice` should not only be available to clients within the DC/OS cluster but publicly available, from the wider Internet. So we aim to end up with the following situation:
 
     ASCII diagram
 
@@ -382,22 +383,27 @@ In its default configuration, just as we did with the `dcos package install` com
       }
     }
 
-MLB is using [HAProxy](http://www.haproxy.org/) under the hood and gets the information it needs to re-write the mappings from frontends to backends from the Marathon event bus. Once MLB is installed, you need to [locate the public agent](https://dcos.io/docs/1.8/administration/locate-public-agent/) it runs on, let's say `$PUBLIC_AGENT` is the resulting IP or FQDN. Now, to see the HAProxy MLB has under management in action, visit the URL `http://$PUBLIC_AGENT:9090/haproxy?stats` and you should see something like the following:
+MLB is using [HAProxy](http://www.haproxy.org/) under the hood and gets the information it needs to re-write the mappings from frontends to backends from the Marathon event bus. Once MLB is installed, you need to [locate the public agent](https://dcos.io/docs/1.8/administration/locate-public-agent/) it runs on, let's say `$PUBLIC_AGENT` is the resulting IP. Now, to see the HAProxy MLB has under management in action, visit the URL `http://$PUBLIC_AGENT:9090/haproxy?stats` and you should see something like the following:
 
 ![MLB HAProxy idle](img/haproxy-idle.png)
 
-To explore the behaviour of exposing `simpleservice` via MLB we're using [v09.json](canary/v09.json); here are the two new sections highlighted that have been added to `base-health.json` to make this happen:
+To explore the behaviour of exposing `simpleservice` via MLB we're using [v09.json](canary/v09.json). In the following is the new section highlighted that has been added to `base-health.json` to make this happen:
 
     "labels": {
       "HAPROXY_GROUP": "external"
-    },
-    "portDefinitions": [{
-      "protocol": "tcp",
-      "name": "main-api",
-      "port": 10099
-    }]
+      "HAPROXY_0_PORT": "10099",
+      "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com",
+      "HAPROXY_0_BACKEND_WEIGHT": "75"
+    }
 
-Note that the content of `labels` instructs DC/OS to expose it on the (edge routing) MLB we installed in the previous step. Also, note that in the `portDefinitions` we've now specified `10099` as the external, public port we want `simpleservice` to be available. Let's check HAProxy now:
+The semantics of the added labels from above, defining [service-level HAProxy configurations](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#templates), is as follows:
+
+- `HAPROXY_GROUP` is set to expose it on the (edge-routing) MLB we installed in the previous step.
+- `HAPROXY_0_PORT` defines`10099` as the external, public port we want `simpleservice` to be available.
+- `HAPROXY_0_VHOST` is the virtual host to be used for the edge routing, in my case the FQDN of the public agent, see also the [MLB docs](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/usage/).
+- `HAPROXY_0_BACKEND_WEIGHT` is set to a value corresponding to 3/4 of the overall traffic, see also a respective [serverfault question](http://serverfault.com/questions/232168/basic-weight-questions-with-haproxy).
+
+Let's check HAProxy now:
 
 ![MLB HAProxy with simpleservice v0.9 running](img/haproxy-v09.png)
 
@@ -468,11 +474,6 @@ We can now check which version clients of `simpleservice` see, using the [canary
     Out of 10 clients of simpleservice 5 saw version 0.9 and 5 saw version 1.0
 
 Tip: If you want to simulate more clients here, pass in the number of clients as the second argument, as in `./canary-check.sh http://52.25.126.14 100` to simulate 100 clients, for example.
-
-What happened here? Note: default weights cause 50% for each, needs to be patched
-
-https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#haproxy_n_backend_weight
-
 
 
 
