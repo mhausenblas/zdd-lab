@@ -1,6 +1,6 @@
 {
   "id": "/zdd/canary09",
-  "instances": 3,
+  "instances": 9,
   "cpus": 0.1,
   "mem": 32,
   "container": {
@@ -28,6 +28,6 @@
     "HAPROXY_GROUP": "external",
     "HAPROXY_0_PORT": "10099",
     "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com",
-    "HAPROXY_0_BACKEND_WEIGHT": "75"
+    "HAPROXY_0_BACKEND_WEIGHT": "90"
   }
 }

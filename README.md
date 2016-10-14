@@ -29,6 +29,7 @@ Finally, as a preparation you should have a (quick) look at the following docs:
 - [health checks](https://mesosphere.github.io/marathon/docs/health-checks.html)
 - [deployments](https://mesosphere.github.io/marathon/docs/deployments.html)
 - [readiness checks](https://mesosphere.github.io/marathon/docs/readiness-checks.html) (OPTIONAL)
+- [load balancing with HAProxy](https://serversforhackers.com/load-balancing-with-haproxy)
 - [Marathon-LB ZDD](https://github.com/mesosphere/marathon-lb#zero-downtime-deployments)
 
 ## Default behaviour
@@ -393,69 +394,73 @@ To explore the behaviour of exposing `simpleservice` via MLB we're using [v09.js
       "HAPROXY_GROUP": "external"
       "HAPROXY_0_PORT": "10099",
       "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com",
-      "HAPROXY_0_BACKEND_WEIGHT": "75"
+      "HAPROXY_0_BACKEND_WEIGHT": "3"
     }
 
-The semantics of the added labels from above, defining [service-level HAProxy configurations](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#templates), is as follows:
+The semantics of the added labels from above is as follows:
 
 - `HAPROXY_GROUP` is set to expose it on the (edge-routing) MLB we installed in the previous step.
 - `HAPROXY_0_PORT` defines`10099` as the external, public port we want `simpleservice` to be available.
 - `HAPROXY_0_VHOST` is the virtual host to be used for the edge routing, in my case the FQDN of the public agent, see also the [MLB docs](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/usage/).
 - `HAPROXY_0_BACKEND_WEIGHT` is set to a value corresponding to 3/4 of the overall traffic, see also a respective [serverfault question](http://serverfault.com/questions/232168/basic-weight-questions-with-haproxy).
 
-Let's check HAProxy now:
+Note that the labels you specify here actually define [service-level HAProxy configurations](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#templates) under the hood. 
+
+Let's check what's going on in HAProxy now:
 
 ![MLB HAProxy with simpleservice v0.9 running](img/haproxy-v09.png)
 
-In above HAProxy screen shot we can see the one frontend for our service, serving on `52.25.126.14:10099` (with `52.25.126.14` being the IP of my public agent) and the four backends `10_0_3_192_4829`, `10_0_3_192_16412`, `10_0_3_193_10168`, and `10_0_3_193_24681` which correspond exactly to the four instances DC/OS has launched as requested:
-
-    $ dcos marathon task list /zdd/canary09
-    APP            HEALTHY          STARTED              HOST     ID
-    /zdd/canary09    True   2016-10-14T10:13:48.389Z  10.0.3.193  zdd_canary09.e53ab1b7-91f6-11e6-aae4-3a4b79075094
-    /zdd/canary09    True   2016-10-14T10:13:48.409Z  10.0.3.193  zdd_canary09.e53b26e9-91f6-11e6-aae4-3a4b79075094
-    /zdd/canary09    True   2016-10-14T10:13:48.414Z  10.0.3.192  zdd_canary09.e53a1576-91f6-11e6-aae4-3a4b79075094
-    /zdd/canary09    True   2016-10-14T10:13:48.445Z  10.0.3.192  zdd_canary09.e53affd8-91f6-11e6-aae4-3a4b79075094
-
-Or, to verify the ports we can use Mesos-DNS from within the cluster:
+In above HAProxy screen shot we can see the one frontend for our service, serving on `52.25.126.14:10099` (with `52.25.126.14` being the IP of my public agent) and 9 backends, corresponding to the 9 instances DC/OS has launched as requested. To verify the ports we can use Mesos-DNS from within the cluster:
 
     core@ip-10-0-6-211 ~ $ dig _canary09-zdd._tcp.marathon.mesos SRV
+    ;; Truncated, retrying in TCP mode.
     
     ; <<>> DiG 9.10.2-P4 <<>> _canary09-zdd._tcp.marathon.mesos SRV
     ;; global options: +cmd
     ;; Got answer:
-    ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 24213
-    ;; flags: qr aa rd ra; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 4
+    ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 15083
+    ;; flags: qr aa rd ra; QUERY: 1, ANSWER: 9, AUTHORITY: 0, ADDITIONAL: 9
     
     ;; QUESTION SECTION:
     ;_canary09-zdd._tcp.marathon.mesos. IN	SRV
     
     ;; ANSWER SECTION:
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 10168 canary09-zdd-o1yxt-s1.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 16412 canary09-zdd-wkhxe-s2.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 4829 canary09-zdd-oigsu-s2.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 24681 canary09-zdd-ewga5-s1.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 7700 canary09-zdd-6fdxh-s2.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 3305 canary09-zdd-a84e8-s1.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 3254 canary09-zdd-5y883-s1.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 14070 canary09-zdd-7k6pj-s1.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 4965 canary09-zdd-1or1r-s2.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 6326 canary09-zdd-3oyra-s1.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 2622 canary09-zdd-wrqtj-s1.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 5247 canary09-zdd-sf5tt-s2.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 15849 canary09-zdd-sqzbn-s2.marathon.mesos.
     
     ;; ADDITIONAL SECTION:
-    canary09-zdd-oigsu-s2.marathon.mesos. 60 IN A	10.0.3.192
-    canary09-zdd-wkhxe-s2.marathon.mesos. 60 IN A	10.0.3.192
-    canary09-zdd-ewga5-s1.marathon.mesos. 60 IN A	10.0.3.193
-    canary09-zdd-o1yxt-s1.marathon.mesos. 60 IN A	10.0.3.193
+    canary09-zdd-1or1r-s2.marathon.mesos. 60 IN A	10.0.3.192
+    canary09-zdd-a84e8-s1.marathon.mesos. 60 IN A	10.0.3.193
+    canary09-zdd-wrqtj-s1.marathon.mesos. 60 IN A	10.0.3.193
+    canary09-zdd-sf5tt-s2.marathon.mesos. 60 IN A	10.0.3.192
+    canary09-zdd-7k6pj-s1.marathon.mesos. 60 IN A	10.0.3.193
+    canary09-zdd-6fdxh-s2.marathon.mesos. 60 IN A	10.0.3.192
+    canary09-zdd-sqzbn-s2.marathon.mesos. 60 IN A	10.0.3.192
+    canary09-zdd-5y883-s1.marathon.mesos. 60 IN A	10.0.3.193
+    canary09-zdd-3oyra-s1.marathon.mesos. 60 IN A	10.0.3.193
     
-    ;; Query time: 1 msec
+    ;; Query time: 2 msec
     ;; SERVER: 198.51.100.1#53(198.51.100.1)
-    ;; WHEN: Fri Oct 14 10:25:10 UTC 2016
-    ;; MSG SIZE  rcvd: 283
+    ;; WHEN: Fri Oct 14 21:13:25 UTC 2016
+    ;; MSG SIZE  rcvd: 573
 
 So we're now in the position that we can access version `0.9` of `simpleservice` from outside the cluster:
 
     $ curl http://52.25.126.14:10099/endpoint0
     {"host": "52.25.126.14:10099", "version": "0.9", "result": "all is well"}
 
-Now we deploy version `1.0` of the service, using [v10.json](canary/v10.json). The resulting HAProxy view is as follows
+Next, we deploy version `1.0` of `simpleservice`, using [v10.json](canary/v10.json). The resulting HAProxy view is as follows:
 
 ![MLB HAProxy with simpleservice v0.9 and v1.0 running](img/haproxy-v09-v10.png)
 
-Notice above that we now have two frontends `zdd_canary09_10099` and `zdd_canary10_10099`, both serving on the same port, `10099` as well as five backends (4 serving version `0.9` and 1 serving version `1.0`) as we would expect.
+Notice above that we now have two frontends `zdd_canary09_10099` and `zdd_canary10_10099`, both serving on the same port, `10099` as well as two backends with 9 instances serving version `0.9` and 1 serving version `1.0`, as we would expect.
 
 We can now check which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script:
 
@@ -474,8 +479,6 @@ We can now check which version clients of `simpleservice` see, using the [canary
     Out of 10 clients of simpleservice 5 saw version 0.9 and 5 saw version 1.0
 
 Tip: If you want to simulate more clients here, pass in the number of clients as the second argument, as in `./canary-check.sh http://52.25.126.14 100` to simulate 100 clients, for example.
-
-
 
 
 ## Blue-Green deployment
