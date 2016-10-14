@@ -335,6 +335,146 @@ At `T3`, one `0.9` instance is stopped and replaced by a `1.0` instance; at `T4`
 
 Lesson learned: certain combinations of `minimumHealthCapacity` and `maximumOverCapacity` make sense while others are not satisfiable, meaning that you can specify them, just the deployment will never be carried out. For example, a `"minimumHealthCapacity": 0.5` and `"maximumOverCapacity": 0.1` would be unsatisfiable, since you want to keep at least half of your instances around but only allow 10% overcapacity. To make this latter deployment satisfiable you'd need to change it to `"maximumOverCapacity": 0.5`.
 
+Tip: If you want to see the exact sequence of events happening, use the [Event Bus](https://mesosphere.github.io/marathon/docs/event-bus.html), like so (note that this is executed from within the DC/OS cluster):
+
+    $ curl -H "Accept: text/event-stream" leader.mesos:8080/v2/events 
+    event: event_stream_attached
+    data: {"remoteAddress":"10.0.6.211","eventType":"event_stream_attached","timestamp":"2016-10-13T13:29:08.959Z"}
+
+A recording of an example session for the above case (`/zdd/base-min-over`) is available here: [event-bus-log-base-min-over.txt](event-bus-log-base-min-over.txt).
+
 ## Canary deployment
+
+The deployments discussed so far all allowed us to do rolling upgrades of a service without causing any downtimes. That is, at any point in time, clients of the `simpleservice` would be served with some version of the service. However, there is one drawback so far: clients of the service would potentially see different versions during the deployment in an uncontrolled manner until the point in time all new instances of the service would turn healthy.
+
+In a more realistic setup one would use a load balancer in front of the service instances: on the one hand, this would more evenly distribute the load amongst the service instances and on the other hand it allows us to carry out more advanced ZDD such as the one we're discussing in the following: a [canary deployment](http://martinfowler.com/bliki/CanaryRelease.html). The basic idea behind it is to expose a small fraction of the clients, say, for example 10% to a new version of the service and once you're confident it works as expected you roll out the new version to all users. If you take this a step further, for example, by having multiple versions of the service you can do also A/B testing with it.
+
+We now have a look at a canary deployment with DC/OS: we want to have four instances serving version `0.9` of `simpleservice` and one instance serving version `1.0`. In addition, we now expose the service to the outside world, that is, `simpleservice` should not only be available to clients within the DC/OS cluster but publicly available, from the wider Internet. So we aim to end up with the following situation:
+
+    ASCII diagram
+
+As a first step, we need a load balancer: for this to happen we install [Marathon-LB](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/) (MLB for short) from the Universe:
+
+    $ dcos package install marathon-lb
+    We recommend a minimum of 0.5 CPUs and 256 MB of RAM available for the Marathon-LB DCOS Service.
+    Continue installing? [yes/no] yes
+    Installing Marathon app for package [marathon-lb] version [1.4.1]
+    Marathon-lb DC/OS Service has been successfully installed!
+    See https://github.com/mesosphere/marathon-lb for documentation.
+
+In its default configuration, just as we did with the `dcos package install` command above, MLB runs on a public agent, acting as an edge router and allows us to expose a DC/OS service to the outside world. The MLB default config looks like the following:
+
+    {
+      "marathon-lb": {
+        "auto-assign-service-ports": false,
+        "bind-http-https": true,
+        "cpus": 2,
+        "haproxy-group": "external",
+        "haproxy-map": true,
+        "instances": 1,
+        "mem": 1024,
+        "minimumHealthCapacity": 0.5,
+        "maximumOverCapacity": 0.2,
+        "name": "marathon-lb",
+        "role": "slave_public",
+        "sysctl-params": "net.ipv4.tcp_tw_reuse=1 net.ipv4.tcp_fin_timeout=30 net.ipv4.tcp_max_syn_backlog=10240 net.ipv4.tcp_max_tw_buckets=400000 net.ipv4.tcp_max_orphans=60000 net.core.somaxconn=10000",
+        "marathon-uri": "http://master.mesos:8080"
+      }
+    }
+
+MLB is using [HAProxy](http://www.haproxy.org/) under the hood and gets the information it needs to re-write the mappings from frontends to backends from the Marathon event bus. Once MLB is installed, you need to [locate the public agent](https://dcos.io/docs/1.8/administration/locate-public-agent/) it runs on, let's say `$PUBLIC_AGENT` is the resulting IP or FQDN. Now, to see the HAProxy MLB has under management in action, visit the URL `http://$PUBLIC_AGENT:9090/haproxy?stats` and you should see something like the following:
+
+![MLB HAProxy idle](img/haproxy-idle.png)
+
+To explore the behaviour of exposing `simpleservice` via MLB we're using [v09.json](canary/v09.json); here are the two new sections highlighted that have been added to `base-health.json` to make this happen:
+
+    "labels": {
+      "HAPROXY_GROUP": "external"
+    },
+    "portDefinitions": [{
+      "protocol": "tcp",
+      "name": "main-api",
+      "port": 10099
+    }]
+
+Note that the content of `labels` instructs DC/OS to expose it on the (edge routing) MLB we installed in the previous step. Also, note that in the `portDefinitions` we've now specified `10099` as the external, public port we want `simpleservice` to be available. Let's check HAProxy now:
+
+![MLB HAProxy with simpleservice v0.9 running](img/haproxy-v09.png)
+
+In above HAProxy screen shot we can see the one frontend for our service, serving on `52.25.126.14:10099` (with `52.25.126.14` being the IP of my public agent) and the four backends `10_0_3_192_4829`, `10_0_3_192_16412`, `10_0_3_193_10168`, and `10_0_3_193_24681` which correspond exactly to the four instances DC/OS has launched as requested:
+
+    $ dcos marathon task list /zdd/canary09
+    APP            HEALTHY          STARTED              HOST     ID
+    /zdd/canary09    True   2016-10-14T10:13:48.389Z  10.0.3.193  zdd_canary09.e53ab1b7-91f6-11e6-aae4-3a4b79075094
+    /zdd/canary09    True   2016-10-14T10:13:48.409Z  10.0.3.193  zdd_canary09.e53b26e9-91f6-11e6-aae4-3a4b79075094
+    /zdd/canary09    True   2016-10-14T10:13:48.414Z  10.0.3.192  zdd_canary09.e53a1576-91f6-11e6-aae4-3a4b79075094
+    /zdd/canary09    True   2016-10-14T10:13:48.445Z  10.0.3.192  zdd_canary09.e53affd8-91f6-11e6-aae4-3a4b79075094
+
+Or, to verify the ports we can use Mesos-DNS from within the cluster:
+
+    core@ip-10-0-6-211 ~ $ dig _canary09-zdd._tcp.marathon.mesos SRV
+    
+    ; <<>> DiG 9.10.2-P4 <<>> _canary09-zdd._tcp.marathon.mesos SRV
+    ;; global options: +cmd
+    ;; Got answer:
+    ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 24213
+    ;; flags: qr aa rd ra; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 4
+    
+    ;; QUESTION SECTION:
+    ;_canary09-zdd._tcp.marathon.mesos. IN	SRV
+    
+    ;; ANSWER SECTION:
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 10168 canary09-zdd-o1yxt-s1.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 16412 canary09-zdd-wkhxe-s2.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 4829 canary09-zdd-oigsu-s2.marathon.mesos.
+    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 24681 canary09-zdd-ewga5-s1.marathon.mesos.
+    
+    ;; ADDITIONAL SECTION:
+    canary09-zdd-oigsu-s2.marathon.mesos. 60 IN A	10.0.3.192
+    canary09-zdd-wkhxe-s2.marathon.mesos. 60 IN A	10.0.3.192
+    canary09-zdd-ewga5-s1.marathon.mesos. 60 IN A	10.0.3.193
+    canary09-zdd-o1yxt-s1.marathon.mesos. 60 IN A	10.0.3.193
+    
+    ;; Query time: 1 msec
+    ;; SERVER: 198.51.100.1#53(198.51.100.1)
+    ;; WHEN: Fri Oct 14 10:25:10 UTC 2016
+    ;; MSG SIZE  rcvd: 283
+
+So we're now in the position that we can access version `0.9` of `simpleservice` from outside the cluster:
+
+    $ curl http://52.25.126.14:10099/endpoint0
+    {"host": "52.25.126.14:10099", "version": "0.9", "result": "all is well"}
+
+Now we deploy version `1.0` of the service, using [v10.json](canary/v10.json). The resulting HAProxy view is as follows
+
+![MLB HAProxy with simpleservice v0.9 and v1.0 running](img/haproxy-v09-v10.png)
+
+Notice above that we now have two frontends `zdd_canary09_10099` and `zdd_canary10_10099`, both serving on the same port, `10099` as well as five backends (4 serving version `0.9` and 1 serving version `1.0`) as we would expect.
+
+We can now check which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script:
+
+    $ cd canary/
+    $ ./canary-check.sh http://52.25.126.14
+    Invoking simpleservice: 0
+    Invoking simpleservice: 1
+    Invoking simpleservice: 2
+    Invoking simpleservice: 3
+    Invoking simpleservice: 4
+    Invoking simpleservice: 5
+    Invoking simpleservice: 6
+    Invoking simpleservice: 7
+    Invoking simpleservice: 8
+    Invoking simpleservice: 9
+    Out of 10 clients of simpleservice 5 saw version 0.9 and 5 saw version 1.0
+
+Tip: If you want to simulate more clients here, pass in the number of clients as the second argument, as in `./canary-check.sh http://52.25.126.14 100` to simulate 100 clients, for example.
+
+What happened here? Note: default weights cause 50% for each, needs to be patched
+
+https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#haproxy_n_backend_weight
+
+
+
+
 
 ## Blue-Green deployment

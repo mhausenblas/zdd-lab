@@ -1,6 +1,6 @@
 {
-  "id": "/zdd/canary",
-  "instances": 4,
+  "id": "/zdd/canary10",
+  "instances": 1,
   "cpus": 0.1,
   "mem": 32,
   "container": {
@@ -13,7 +13,7 @@
   "env": {
     "HEALTH_MIN": "1000",
     "HEALTH_MAX": "5000",
-    "SIMPLE_SERVICE_VERSION": "0.9"
+    "SIMPLE_SERVICE_VERSION": "1.0"
   },
   "healthChecks": [{
     "protocol": "HTTP",
@@ -24,8 +24,12 @@
     "maxConsecutiveFailures": 3,
     "ignoreHttp1xx": false
   }],
-  "upgradeStrategy": {
-    "minimumHealthCapacity": 0.25,
-    "maximumOverCapacity": 0.25
+  "labels": {
+    "HAPROXY_GROUP": "external"
   },
+  "portDefinitions": [{
+    "protocol": "tcp",
+    "name": "main-api",
+    "port": 10099
+  }]
 }

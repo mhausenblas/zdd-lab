@@ -1,5 +1,5 @@
 {
-  "id": "/zdd/canary",
+  "id": "/zdd/canary09",
   "instances": 4,
   "cpus": 0.1,
   "mem": 32,
@@ -24,8 +24,12 @@
     "maxConsecutiveFailures": 3,
     "ignoreHttp1xx": false
   }],
-  "upgradeStrategy": {
-    "minimumHealthCapacity": 0.25,
-    "maximumOverCapacity": 0.25
+  "labels": {
+    "HAPROXY_GROUP": "external"
   },
+  "portDefinitions": [{
+    "protocol": "tcp",
+    "name": "main-api",
+    "port": 10099
+  }]
 }
