@@ -628,7 +628,7 @@ So we can test `green` cluster-internally, for example using the following comma
     core@ip-10-0-6-211 ~ $ curl green-zdd.marathon.mesos:7077/endpoint0
     {"host": "green-zdd.marathon.mesos:7077", "version": "1.0", "result": "all is well"}
 
-Now let's say we're satisfied with `green`, all instances are healthy so we update it with while scaling back `blue` to `0` instances:
+Now let's say we're satisfied with `green`, all instances are healthy so we update it with below snippet, effectively exposing it via MLB, while simultaneously scaling back `blue` to `0` instances:
 
     "labels": {
       "HAPROXY_GROUP": "external",
