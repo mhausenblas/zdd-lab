@@ -349,11 +349,33 @@ A recording of an example session for the above case (`/zdd/base-min-over`) is a
 
 The deployments discussed so far all allowed us to do rolling upgrades of a service without causing any downtimes. That is, at any point in time, clients of the `simpleservice` would be served with some version of the service. However, there is one drawback with the deployments so far: clients of the service will potentially see different versions during the deployment in an uncontrolled manner until the point in time all new instances of the service would turn healthy.
 
-In a more realistic setup one would use a load balancer in front of the service instances: on the one hand, this would more evenly distribute the load amongst the service instances and on the other hand it allows us to carry out more advanced ZDD such as the one we're discussing in the following: a [canary deployment](http://martinfowler.com/bliki/CanaryRelease.html). The basic idea behind it is to expose a small fraction of the clients, say, for example 10% to a new version of the service and once you're confident it works as expected you roll out the new version to all users. If you take this a step further, for example, by having multiple versions of the service you can do also A/B testing with it.
+In a more realistic setup one would use a load balancer in front of the service instances: on the one hand, this would more evenly distribute the load amongst the service instances and on the other hand it allows us to carry out more advanced ZDD such as the one we're discussing in the following: a [canary deployment](http://martinfowler.com/bliki/CanaryRelease.html). The basic idea behind it is to expose a small fraction of the clients to a new version of the service. Once you're confident it works as expected you roll out the new version to all users. If you take this a step further, for example, by having multiple versions of the service you can do also A/B testing with it.
 
-We now have a look at a canary deployment with DC/OS: we want to have 3 instances serving version `0.9` of `simpleservice` and 1 instance serving version `1.0`. In addition, we now expose the service to the outside world, that is, `simpleservice` should not only be available to clients within the DC/OS cluster but publicly available, from the wider Internet. So we aim to end up with the following situation:
+We now have a look at a canary deployment with DC/OS: we will have 3 instances serving version `0.9` of `simpleservice` and 1 instance serving version `1.0` and want 80% of the traffic to be served by the former and 20% by the latter, the canary. In addition and in contrast to the previous cases want to expose the service to the outside world. That is, `simpleservice` should not only be available to clients within the DC/OS cluster but publicly available, from the wider Internet. So we aim to end up with the following situation:
 
-    ASCII diagram
+    +----------+
+    |          |
+    |   v0.9   +----+
+    |          |    |
+    +----------+    |
+                    |                 +----------+
+    +----------+    |                 |          |
+    |          |    |             80% |          |
+    |   v0.9   +----------------------+          |
+    |          |    |                 |          |
+    +----------+    |                 |          |
+                    |                 |          | <-------------+ clients
+    +----------+    |                 |          |
+    |          |    |             20% |          |
+    |   v0.9   +----+        +--------+          |
+    |          |             |        |          |
+    +----------+             |        |          |
+                             |        +----------+
+    +----------+             |
+    |          |             |
+    |   v1.0   +-------------+
+    |          |
+    +----------+
 
 As a first step, we need a load balancer: for this to happen we install [Marathon-LB](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/) (MLB for short) from the Universe:
 
@@ -393,8 +415,7 @@ To explore the behaviour of exposing `simpleservice` via MLB we're using [v09.js
     "labels": {
       "HAPROXY_GROUP": "external"
       "HAPROXY_0_PORT": "10099",
-      "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com",
-      "HAPROXY_0_BACKEND_WEIGHT": "3"
+      "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com"
     }
 
 The semantics of the added labels from above is as follows:
@@ -402,7 +423,6 @@ The semantics of the added labels from above is as follows:
 - `HAPROXY_GROUP` is set to expose it on the (edge-routing) MLB we installed in the previous step.
 - `HAPROXY_0_PORT` defines`10099` as the external, public port we want `simpleservice` to be available.
 - `HAPROXY_0_VHOST` is the virtual host to be used for the edge routing, in my case the FQDN of the public agent, see also the [MLB docs](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/usage/).
-- `HAPROXY_0_BACKEND_WEIGHT` is set to a value corresponding to 3/4 of the overall traffic, see also a respective [serverfault question](http://serverfault.com/questions/232168/basic-weight-questions-with-haproxy).
 
 Note that the labels you specify here actually define [service-level HAProxy configurations](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#templates) under the hood. 
 
@@ -479,6 +499,12 @@ We can now check which version clients of `simpleservice` see, using the [canary
     Out of 10 clients of simpleservice 5 saw version 0.9 and 5 saw version 1.0
 
 Tip: If you want to simulate more clients here, pass in the number of clients as the second argument, as in `./canary-check.sh http://52.25.126.14 100` to simulate 100 clients, for example.
+
+Now, what happened here? It looks like that MLB sent 50% (depending on the run this can vary, but in average it's a 50:50 split) of the traffic to each version of `simpleservice`. Also, note that if you read the MLB docs [in detail](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md) you might stumble over the `HAPROXY_0_BACKEND_WEIGHT` template, which seems to suggest to do what we're looking for. Take it from me, it does not.
+
+So, where does this leave us? We need a different approach to achieve the desired 80/20 split for the canary.
+
+Enter [VAMP](http://vamp.io/).
 
 
 ## Blue-Green deployment
