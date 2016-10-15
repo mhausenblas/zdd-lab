@@ -1,0 +1,33 @@
+{
+  "id": "/vamp/vamp-gateway-agent",
+  "args": [
+    "--storeType=zookeeper",
+    "--storeConnection=zk-1.zk:2181",
+    "--storeKey=/vamp/haproxy/1.6",
+    "--logstash=elasticsearch-executor.elasticsearch.mesos:10001"
+  ],
+  "cpus": 0.2,
+  "mem": 256.0,
+  "instances": 3,
+  "acceptedResourceRoles": [
+    "slave_public",
+    "*"
+  ],
+  "container": {
+    "type": "DOCKER",
+    "docker": {
+      "image": "magneticio/vamp-gateway-agent:0.9.0",
+      "network": "HOST",
+      "portMappings": [],
+      "privileged": true,
+      "parameters": []
+    }
+  },
+  "env": {},
+  "constraints": [
+    [
+      "hostname",
+      "UNIQUE"
+    ]
+  ]
+}

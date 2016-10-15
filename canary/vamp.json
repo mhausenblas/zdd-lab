@@ -11,9 +11,6 @@
       "forcePullImage": true
     }
   },
-  "env": {
-    "VAMP_LIFTER_ARTIFACT_FILES": "[\"breeds/health.js\",\"workflows/health.yml\",\"breeds/metrics.js\",\"workflows/metrics.yml\",\"breeds/kibana.js\",\"workflows/kibana.yml\"]"
-  },
   "acceptedResourceRoles": [
     "slave_public"
   ]

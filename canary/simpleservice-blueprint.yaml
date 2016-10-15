@@ -1,0 +1,37 @@
+---
+name: simpleservice
+gateways:
+  10099: simpleservice/port
+clusters:
+  simpleservice:
+   gateways:
+      routes:
+        simpleservice:0.9:
+          weight: 80%
+        simpleservice:1.0:
+          weight: 20%
+   services:
+      -
+        breed:
+          name: simpleservice:0.9
+          deployable: mhausenblas/simpleservice:0.4.0
+          ports:
+            port: 0/http
+          env:
+            SIMPLE_SERVICE_VERSION: "0.9"
+        scale:
+          cpu: 0.1
+          memory: 32MB
+          instances: 3
+      -
+        breed:
+          name: simpleservice:1.0
+          deployable: mhausenblas/simpleservice:0.4.0
+          ports:
+            port: 0/http
+          env:
+            SIMPLE_SERVICE_VERSION: "1.0"
+        scale:
+          cpu: 0.1
+          memory: 32MB
+          instances: 1

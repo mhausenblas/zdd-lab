@@ -506,12 +506,71 @@ So, where does this leave us? We need a different approach to achieve the desire
 
 Enter [VAMP](http://vamp.io/). VAMP is a platform for managing containerized microservices, supporting canary releases, route updates, metrics collection and service discovery. Note that while VAMP is conveniently available as a [package in the DC/OS Universe](https://github.com/mesosphere/universe/tree/version-3.x/repo/packages/V/vamp/) we will install a more recent version manually in the following to address a dependency (Elasticsearch/Logstash) better and have a finer-grained control over how we want to use VAMP.
 
-First, in case you still have MLB around, uninstall/remove it along with all old canary versions. Then, first deploy [vamp-es.json](canary/vamp-es.json) and then [vamp.json](canary/vamp.json) either via the `dcos marathon app add` command or using the DC/OS UI.
+First, in case you still have MLB around, uninstall/remove it along with all old canary versions. Then, first deploy [vamp-es.json](canary/vamp-es.json) then [vamp.json](canary/vamp.json) and then [vamp-gateway.json](canary/vamp-gateway.json) either via the `dcos marathon app add` command or using the DC/OS UI. Note that in `vamp-gateway.json` you need to change the `instances` to the number of agents you have in your cluster (find that out via `dcos node`):
 
-Now, head over to ``http://$PUBLIC_AGENT:8080`, in my case `http://52.25.126.14:8080/` and you should see:
+    ...
+    "instances": 3,
+    ...
+
+Head over to ``http://$PUBLIC_AGENT:8080`, in my case `http://52.25.126.14:8080/` and you should see:
 
 ![VAMP idle](img/vamp-idle.png)
 
+Now you can define a VAMP blueprint (also available via [simpleservice-blueprint.yaml](canary/simpleservice-blueprint.yaml)) by pasting it in the VAMP UI under the `Blueprints` tab and hit `Create` or use the VAMP [HTTP API](http://vamp.io/documentation/api-reference/) to submit it:
 
+    ---
+    name: simpleservice
+    gateways:
+      10099: simpleservice/port
+    clusters:
+      simpleservice:
+       gateways:
+          routes:
+            simpleservice:0.9:
+              weight: 80%
+            simpleservice:1.0:
+              weight: 20%
+       services:
+          -
+            breed:
+              name: simpleservice:0.9
+              deployable: mhausenblas/simpleservice:0.4.0
+              ports:
+                port: 0/http
+              env:
+                SIMPLE_SERVICE_VERSION: "0.9"
+            scale:
+              cpu: 0.1
+              memory: 32MB
+              instances: 3
+          -
+            breed:
+              name: simpleservice:1.0
+              deployable: mhausenblas/simpleservice:0.4.0
+              ports:
+                port: 0/http
+              env:
+                SIMPLE_SERVICE_VERSION: "1.0"
+            scale:
+              cpu: 0.1
+              memory: 32MB
+              instances: 1
+
+If we now check again which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script, we see the expected 80:20 split:
+
+    $ ./canary-check.sh http://52.25.126.14 10
+    Invoking simpleservice: 0
+    Invoking simpleservice: 1
+    Invoking simpleservice: 2
+    Invoking simpleservice: 3
+    Invoking simpleservice: 4
+    Invoking simpleservice: 5
+    Invoking simpleservice: 6
+    Invoking simpleservice: 7
+    Invoking simpleservice: 8
+    Invoking simpleservice: 9
+    Out of 10 clients of simpleservice 8 saw version 0.9 and 2 saw version 1.0
+
+With this we conclude the canary deployment section and if you want to learn more, you might also want to check out the [VAMP tutorial on this topic](http://vamp.io/documentation/guides/getting-started-tutorial/2-canary-release/).
 
 ## Blue-Green deployment
