@@ -1,0 +1,20 @@
+{
+  "id": "vamp/vamp",
+  "instances": 1,
+  "cpus": 0.5,
+  "mem": 1024,
+  "container": {
+    "type": "DOCKER",
+    "docker": {
+      "image": "magneticio/vamp:0.9.0-dcos",
+      "network": "HOST",
+      "forcePullImage": true
+    }
+  },
+  "env": {
+    "VAMP_LIFTER_ARTIFACT_FILES": "[\"breeds/health.js\",\"workflows/health.yml\",\"breeds/metrics.js\",\"workflows/metrics.yml\",\"breeds/kibana.js\",\"workflows/kibana.yml\"]"
+  },
+  "acceptedResourceRoles": [
+    "slave_public"
+  ]
+}

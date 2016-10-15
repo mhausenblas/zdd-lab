@@ -504,7 +504,14 @@ Now, what happened here? It looks like that MLB sent 50% (depending on the run t
 
 So, where does this leave us? We need a different approach to achieve the desired 80/20 split for the canary.
 
-Enter [VAMP](http://vamp.io/).
+Enter [VAMP](http://vamp.io/). VAMP is a platform for managing containerized microservices, supporting canary releases, route updates, metrics collection and service discovery. Note that while VAMP is conveniently available as a [package in the DC/OS Universe](https://github.com/mesosphere/universe/tree/version-3.x/repo/packages/V/vamp/) we will install a more recent version manually in the following to address a dependency (Elasticsearch/Logstash) better and have a finer-grained control over how we want to use VAMP.
+
+First, in case you still have MLB around, uninstall/remove it along with all old canary versions. Then, first deploy [vamp-es.json](canary/vamp-es.json) and then [vamp.json](canary/vamp.json) either via the `dcos marathon app add` command or using the DC/OS UI.
+
+Now, head over to ``http://$PUBLIC_AGENT:8080`, in my case `http://52.25.126.14:8080/` and you should see:
+
+![VAMP idle](img/vamp-idle.png)
+
 
 
 ## Blue-Green deployment
