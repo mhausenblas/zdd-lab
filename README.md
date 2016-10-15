@@ -556,6 +556,14 @@ Now you can define a VAMP blueprint (also available via [simpleservice-blueprint
               memory: 32MB
               instances: 1
 
+To use the above blueprint, hit the `Deploy as` button and you should see the following in the `Deployments` tab:
+
+![VAMP simpleservice deployments](img/vamp-deployments.png)
+
+As well as the following under the `Gateways` tab:
+
+![VAMP simpleservice gateways](img/vamp-gateways.png)
+
 If we now check again which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script, we see the expected 80:20 split:
 
     $ ./canary-check.sh http://52.25.126.14 10
