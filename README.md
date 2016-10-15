@@ -24,12 +24,13 @@ If you want to follow along and try out the described steps yourself, here are t
 - The [DC/OS CLI](https://dcos.io/docs/1.8/usage/cli/) installed and configured. 
 - The [jq](https://stedolan.github.io/jq/) tool, command-line JSON processor, installed.
 
-Finally, as a preparation you should have a (quick) look at the following docs:
+Finally, as a preparation you should have a (quick) look at the following docs (in the order we are using it in the ZDD lab):
 
 - [health checks](https://mesosphere.github.io/marathon/docs/health-checks.html)
 - [deployments](https://mesosphere.github.io/marathon/docs/deployments.html)
 - [readiness checks](https://mesosphere.github.io/marathon/docs/readiness-checks.html) (OPTIONAL)
-- [load balancing with HAProxy](https://serversforhackers.com/load-balancing-with-haproxy)
+- [load balancing with HAProxy](https://serversforhackers.com/load-balancing-with-haproxy) (OPTIONAL)
+- [Marathon Blue-Green deployments](https://mesosphere.github.io/marathon/docs/blue-green-deploy.html)
 - [Marathon-LB ZDD](https://github.com/mesosphere/marathon-lb#zero-downtime-deployments)
 
 ## Default behaviour
@@ -377,133 +378,6 @@ We now have a look at a canary deployment with DC/OS: we will have 3 instances s
     |          |
     +----------+
 
-As a first step, we need a load balancer: for this to happen we install [Marathon-LB](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/) (MLB for short) from the Universe:
-
-    $ dcos package install marathon-lb
-    We recommend a minimum of 0.5 CPUs and 256 MB of RAM available for the Marathon-LB DCOS Service.
-    Continue installing? [yes/no] yes
-    Installing Marathon app for package [marathon-lb] version [1.4.1]
-    Marathon-lb DC/OS Service has been successfully installed!
-    See https://github.com/mesosphere/marathon-lb for documentation.
-
-In its default configuration, just as we did with the `dcos package install` command above, MLB runs on a public agent, acting as an edge router and allows us to expose a DC/OS service to the outside world. The MLB default config looks like the following:
-
-    {
-      "marathon-lb": {
-        "auto-assign-service-ports": false,
-        "bind-http-https": true,
-        "cpus": 2,
-        "haproxy-group": "external",
-        "haproxy-map": true,
-        "instances": 1,
-        "mem": 1024,
-        "minimumHealthCapacity": 0.5,
-        "maximumOverCapacity": 0.2,
-        "name": "marathon-lb",
-        "role": "slave_public",
-        "sysctl-params": "net.ipv4.tcp_tw_reuse=1 net.ipv4.tcp_fin_timeout=30 net.ipv4.tcp_max_syn_backlog=10240 net.ipv4.tcp_max_tw_buckets=400000 net.ipv4.tcp_max_orphans=60000 net.core.somaxconn=10000",
-        "marathon-uri": "http://master.mesos:8080"
-      }
-    }
-
-MLB is using [HAProxy](http://www.haproxy.org/) under the hood and gets the information it needs to re-write the mappings from frontends to backends from the Marathon event bus. Once MLB is installed, you need to [locate the public agent](https://dcos.io/docs/1.8/administration/locate-public-agent/) it runs on, let's say `$PUBLIC_AGENT` is the resulting IP. Now, to see the HAProxy MLB has under management in action, visit the URL `http://$PUBLIC_AGENT:9090/haproxy?stats` and you should see something like the following:
-
-![MLB HAProxy idle](img/haproxy-idle.png)
-
-To explore the behaviour of exposing `simpleservice` via MLB we're using [v09.json](canary/v09.json). In the following is the new section highlighted that has been added to `base-health.json` to make this happen:
-
-    "labels": {
-      "HAPROXY_GROUP": "external"
-      "HAPROXY_0_PORT": "10099",
-      "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com"
-    }
-
-The semantics of the added labels from above is as follows:
-
-- `HAPROXY_GROUP` is set to expose it on the (edge-routing) MLB we installed in the previous step.
-- `HAPROXY_0_PORT` defines`10099` as the external, public port we want `simpleservice` to be available.
-- `HAPROXY_0_VHOST` is the virtual host to be used for the edge routing, in my case the FQDN of the public agent, see also the [MLB docs](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/usage/).
-
-Note that the labels you specify here actually define [service-level HAProxy configurations](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#templates) under the hood. 
-
-Let's check what's going on in HAProxy now:
-
-![MLB HAProxy with simpleservice v0.9 running](img/haproxy-v09.png)
-
-In above HAProxy screen shot we can see the one frontend for our service, serving on `52.25.126.14:10099` (with `52.25.126.14` being the IP of my public agent) and 9 backends, corresponding to the 9 instances DC/OS has launched as requested. To verify the ports we can use Mesos-DNS from within the cluster:
-
-    core@ip-10-0-6-211 ~ $ dig _canary09-zdd._tcp.marathon.mesos SRV
-    ;; Truncated, retrying in TCP mode.
-    
-    ; <<>> DiG 9.10.2-P4 <<>> _canary09-zdd._tcp.marathon.mesos SRV
-    ;; global options: +cmd
-    ;; Got answer:
-    ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 15083
-    ;; flags: qr aa rd ra; QUERY: 1, ANSWER: 9, AUTHORITY: 0, ADDITIONAL: 9
-    
-    ;; QUESTION SECTION:
-    ;_canary09-zdd._tcp.marathon.mesos. IN	SRV
-    
-    ;; ANSWER SECTION:
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 7700 canary09-zdd-6fdxh-s2.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 3305 canary09-zdd-a84e8-s1.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 3254 canary09-zdd-5y883-s1.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 14070 canary09-zdd-7k6pj-s1.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 4965 canary09-zdd-1or1r-s2.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 6326 canary09-zdd-3oyra-s1.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 2622 canary09-zdd-wrqtj-s1.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 5247 canary09-zdd-sf5tt-s2.marathon.mesos.
-    _canary09-zdd._tcp.marathon.mesos. 60 IN SRV	0 0 15849 canary09-zdd-sqzbn-s2.marathon.mesos.
-    
-    ;; ADDITIONAL SECTION:
-    canary09-zdd-1or1r-s2.marathon.mesos. 60 IN A	10.0.3.192
-    canary09-zdd-a84e8-s1.marathon.mesos. 60 IN A	10.0.3.193
-    canary09-zdd-wrqtj-s1.marathon.mesos. 60 IN A	10.0.3.193
-    canary09-zdd-sf5tt-s2.marathon.mesos. 60 IN A	10.0.3.192
-    canary09-zdd-7k6pj-s1.marathon.mesos. 60 IN A	10.0.3.193
-    canary09-zdd-6fdxh-s2.marathon.mesos. 60 IN A	10.0.3.192
-    canary09-zdd-sqzbn-s2.marathon.mesos. 60 IN A	10.0.3.192
-    canary09-zdd-5y883-s1.marathon.mesos. 60 IN A	10.0.3.193
-    canary09-zdd-3oyra-s1.marathon.mesos. 60 IN A	10.0.3.193
-    
-    ;; Query time: 2 msec
-    ;; SERVER: 198.51.100.1#53(198.51.100.1)
-    ;; WHEN: Fri Oct 14 21:13:25 UTC 2016
-    ;; MSG SIZE  rcvd: 573
-
-So we're now in the position that we can access version `0.9` of `simpleservice` from outside the cluster:
-
-    $ curl http://52.25.126.14:10099/endpoint0
-    {"host": "52.25.126.14:10099", "version": "0.9", "result": "all is well"}
-
-Next, we deploy version `1.0` of `simpleservice`, using [v10.json](canary/v10.json). The resulting HAProxy view is as follows:
-
-![MLB HAProxy with simpleservice v0.9 and v1.0 running](img/haproxy-v09-v10.png)
-
-Notice above that we now have two frontends `zdd_canary09_10099` and `zdd_canary10_10099`, both serving on the same port, `10099` as well as two backends with 9 instances serving version `0.9` and 1 serving version `1.0`, as we would expect.
-
-We can now check which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script:
-
-    $ cd canary/
-    $ ./canary-check.sh http://52.25.126.14
-    Invoking simpleservice: 0
-    Invoking simpleservice: 1
-    Invoking simpleservice: 2
-    Invoking simpleservice: 3
-    Invoking simpleservice: 4
-    Invoking simpleservice: 5
-    Invoking simpleservice: 6
-    Invoking simpleservice: 7
-    Invoking simpleservice: 8
-    Invoking simpleservice: 9
-    Out of 10 clients of simpleservice 5 saw version 0.9 and 5 saw version 1.0
-
-Tip: If you want to simulate more clients here, pass in the number of clients as the second argument, as in `./canary-check.sh http://52.25.126.14 100` to simulate 100 clients, for example.
-
-Now, what happened here? It looks like that MLB sent 50% (depending on the run this can vary, but in average it's a 50:50 split) of the traffic to each version of `simpleservice`. Also, note that if you read the MLB docs [in detail](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md) you might stumble over the `HAPROXY_0_BACKEND_WEIGHT` template, which seems to suggest to do what we're looking for. Take it from me, it does not.
-
-So, where does this leave us? We need a different approach to achieve the desired 80/20 split for the canary.
-
 Enter [VAMP](http://vamp.io/). VAMP is a platform for managing containerized microservices, supporting canary releases, route updates, metrics collection and service discovery. Note that while VAMP is conveniently available as a [package in the DC/OS Universe](https://github.com/mesosphere/universe/tree/version-3.x/repo/packages/V/vamp/) we will install a more recent version manually in the following to address a dependency (Elasticsearch/Logstash) better and have a finer-grained control over how we want to use VAMP.
 
 First, in case you still have MLB around, uninstall/remove it along with all old canary versions. Then, first deploy [vamp-es.json](canary/vamp-es.json) then [vamp.json](canary/vamp.json) and then [vamp-gateway.json](canary/vamp-gateway.json) either via the `dcos marathon app add` command or using the DC/OS UI. Note that in `vamp-gateway.json` you need to change the `instances` to the number of agents you have in your cluster (find that out via `dcos node`):
@@ -564,7 +438,7 @@ As well as the following under the `Gateways` tab:
 
 ![VAMP simpleservice gateways](img/vamp-gateways.png)
 
-If we now check again which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script, we see the expected 80:20 split:
+We can now check which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script as shown in the following.
 
     $ ./canary-check.sh http://52.25.126.14 10
     Invoking simpleservice: 0
@@ -579,6 +453,196 @@ If we now check again which version clients of `simpleservice` see, using the [c
     Invoking simpleservice: 9
     Out of 10 clients of simpleservice 8 saw version 0.9 and 2 saw version 1.0
 
+As expected, now 80% of the clients see version `0.9` and 20% are served by version `1.0`.
+
+Tip: If you want to simulate more clients here, pass in the number of clients as the second argument, as in `./canary-check.sh http://52.25.126.14 100` to simulate 100 clients, for example.
+
 With this we conclude the canary deployment section and if you want to learn more, you might also want to check out the [VAMP tutorial on this topic](http://vamp.io/documentation/guides/getting-started-tutorial/2-canary-release/).
 
 ## Blue-Green deployment
+
+Another popular form of ZDD supported by DC/OS is the [Blue-Green deployment](http://martinfowler.com/bliki/BlueGreenDeployment.html). Here, the idea is basically to have two versions of your service (unsurprisingly called `blue` and `green`): let's say that `blue` is the live one, serving production traffic and `green` is the new version to be rolled out. Once all instances of `green` are health, a load balancer is reconfigured to cut over from `blue` to `green` and if necessary (to roll back) one can do the same in the reverse direction. 
+
+Essentially, we want the following. We start out with `blue` being active: 
+
+    +----------------+
+    |                |
+    |                |                +----------+
+    |   blue (v0.9)  +------+         |          |
+    |                |      |         |          |
+    |                |      +---------+          |
+    +----------------+                |          |
+                                      |          |
+                                      |          | <-------------+ clients
+                                      |          |
+    +----------------+                |          |
+    |                |                |          |
+    |                |                |          |
+    |  green (v1.0)  |                |          |
+    |                |                +----------+
+    |                |
+    +----------------+
+
+And once `green` is healthy, we cut over to it by updating the routing:
+
+    +----------------+
+    |                |
+    |                |                +----------+
+    |   blue (v0.9)  |                |          |
+    |                |                |          |
+    |                |                |          |
+    +----------------+                |          |
+                                      |          |
+                                      |          | <-------------+ clients
+                                      |          |
+    +----------------+                |          |
+    |                |      +---------+          |
+    |                |      |         |          |
+    |  green (v1.0)  +------+         |          |
+    |                |                +----------+
+    |                |
+    +----------------+
+
+As a first step, we need a load balancer. For this we install [Marathon-LB](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/) (MLB for short) from the Universe:
+
+    $ dcos package install marathon-lb
+    We recommend a minimum of 0.5 CPUs and 256 MB of RAM available for the Marathon-LB DCOS Service.
+    Continue installing? [yes/no] yes
+    Installing Marathon app for package [marathon-lb] version [1.4.1]
+    Marathon-lb DC/OS Service has been successfully installed!
+    See https://github.com/mesosphere/marathon-lb for documentation.
+
+In its default configuration, just as we did with the `dcos package install` command above, MLB runs on a public agent, acting as an edge router and allows us to expose a DC/OS service to the outside world. The MLB default config looks like the following:
+
+    {
+      "marathon-lb": {
+        "auto-assign-service-ports": false,
+        "bind-http-https": true,
+        "cpus": 2,
+        "haproxy-group": "external",
+        "haproxy-map": true,
+        "instances": 1,
+        "mem": 1024,
+        "minimumHealthCapacity": 0.5,
+        "maximumOverCapacity": 0.2,
+        "name": "marathon-lb",
+        "role": "slave_public",
+        "sysctl-params": "net.ipv4.tcp_tw_reuse=1 net.ipv4.tcp_fin_timeout=30 net.ipv4.tcp_max_syn_backlog=10240 net.ipv4.tcp_max_tw_buckets=400000 net.ipv4.tcp_max_orphans=60000 net.core.somaxconn=10000",
+        "marathon-uri": "http://master.mesos:8080"
+      }
+    }
+
+MLB is using [HAProxy](http://www.haproxy.org/) under the hood and gets the information it needs to re-write the mappings from frontends to backends from the Marathon event bus. Once MLB is installed, you need to [locate the public agent](https://dcos.io/docs/1.8/administration/locate-public-agent/) it runs on, let's say `$PUBLIC_AGENT` is the resulting IP. Now, to see the HAProxy MLB has under management in action, visit the URL `http://$PUBLIC_AGENT:9090/haproxy?stats` and you should see something like the following:
+
+![MLB HAProxy idle](img/haproxy-idle.png)
+
+In the following we will walk through a manual sequence how to achieve the Blue-Green deployment, however in practice an automated approach is recommended (and pointed out at the end of this section).
+
+So, let's dive into it. First we set up the `blue` version of `simpleservice` via MLB we're using [blue.json](blue-green/blue.json). In the following is the new section highlighted that has been added to `base-health.json` to make this happen:
+
+    "labels": {
+      "HAPROXY_GROUP": "external"
+      "HAPROXY_0_PORT": "10080",
+      "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com"
+    }
+
+The semantics of the added labels from above is as follows:
+
+- `HAPROXY_GROUP` is set to expose it on the (edge-routing) MLB we installed in the previous step.
+- `HAPROXY_0_PORT` defines`10080` as the external, public port we want version `0.9` of `simpleservice` to be available.
+- `HAPROXY_0_VHOST` is the virtual host to be used for the edge routing, in my case the FQDN of the public agent, see also the [MLB docs](https://dcos.io/docs/1.8/usage/service-discovery/marathon-lb/usage/).
+
+Note that the labels you specify here actually define [service-level HAProxy configurations](https://github.com/mesosphere/marathon-lb/blob/master/Longhelp.md#templates) under the hood. 
+
+Let's check what's going on in HAProxy now:
+
+![MLB HAProxy blue](img/haproxy-blue.png)
+
+In above HAProxy screen shot we can see the `blue` frontend `zdd_blue_10080` for our service, serving on `52.25.126.14:10099` (with `52.25.126.14` being the IP of my public agent) as well as the `blue`backend `zdd_blue_10080`, corresponding to the four instances DC/OS has launched as requested. To verify the ports we can use Mesos-DNS from within the cluster:
+
+    core@ip-10-0-6-211 ~ $ dig _blue-zdd._tcp.marathon.mesos SRV
+
+    ; <<>> DiG 9.10.2-P4 <<>> _blue-zdd._tcp.marathon.mesos SRV
+    ;; global options: +cmd
+    ;; Got answer:
+    ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 31245
+    ;; flags: qr aa rd ra; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 4
+
+    ;; QUESTION SECTION:
+    ;_blue-zdd._tcp.marathon.mesos.	IN	SRV
+
+    ;; ANSWER SECTION:
+    _blue-zdd._tcp.marathon.mesos. 60 IN	SRV	0 0 19301 blue-zdd-rrf4y-s2.marathon.mesos.
+    _blue-zdd._tcp.marathon.mesos. 60 IN	SRV	0 0 9383 blue-zdd-8sqqy-s2.marathon.mesos.
+    _blue-zdd._tcp.marathon.mesos. 60 IN	SRV	0 0 3238 blue-zdd-4hzbx-s2.marathon.mesos.
+    _blue-zdd._tcp.marathon.mesos. 60 IN	SRV	0 0 10164 blue-zdd-xu4a3-s2.marathon.mesos.
+
+    ;; ADDITIONAL SECTION:
+    blue-zdd-xu4a3-s2.marathon.mesos. 60 IN	A	10.0.3.192
+    blue-zdd-8sqqy-s2.marathon.mesos. 60 IN	A	10.0.3.192
+    blue-zdd-rrf4y-s2.marathon.mesos. 60 IN	A	10.0.3.192
+    blue-zdd-4hzbx-s2.marathon.mesos. 60 IN	A	10.0.3.192
+
+    ;; Query time: 1 msec
+    ;; SERVER: 198.51.100.1#53(198.51.100.1)
+    ;; WHEN: Sat Oct 15 09:15:28 UTC 2016
+    ;; MSG SIZE  rcvd: 263
+
+We're now in the position that we can access version `0.9` of `simpleservice` from outside the cluster:
+
+    $ curl http://52.25.126.14:10080/endpoint0
+    {"host": "52.25.126.14:10080", "version": "0.9", "result": "all is well"}
+
+Next, we deploy version `1.0` of `simpleservice`, using [green.json](blue-green/green.json). Note that nothing has changed so far in HAProxy (check it out, you'll still see the `blue` frontend and backend), however, we have `green` now available within the cluster:
+
+    core@ip-10-0-6-211 ~ $ dig _green-zdd._tcp.marathon.mesos SRV
+
+    ; <<>> DiG 9.10.2-P4 <<>> _green-zdd._tcp.marathon.mesos SRV
+    ;; global options: +cmd
+    ;; Got answer:
+    ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 32879
+    ;; flags: qr aa rd ra; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 4
+
+    ;; QUESTION SECTION:
+    ;_green-zdd._tcp.marathon.mesos.	IN	SRV
+
+    ;; ANSWER SECTION:
+    _green-zdd._tcp.marathon.mesos.	60 IN	SRV	0 0 30238 green-zdd-re77j-s2.marathon.mesos.
+    _green-zdd._tcp.marathon.mesos.	60 IN	SRV	0 0 7077 green-zdd-c8oxq-s2.marathon.mesos.
+    _green-zdd._tcp.marathon.mesos.	60 IN	SRV	0 0 3409 green-zdd-657om-s2.marathon.mesos.
+    _green-zdd._tcp.marathon.mesos.	60 IN	SRV	0 0 19658 green-zdd-w5mkc-s2.marathon.mesos.
+
+    ;; ADDITIONAL SECTION:
+    green-zdd-re77j-s2.marathon.mesos. 60 IN A	10.0.3.192
+    green-zdd-657om-s2.marathon.mesos. 60 IN A	10.0.3.192
+    green-zdd-c8oxq-s2.marathon.mesos. 60 IN A	10.0.3.192
+    green-zdd-w5mkc-s2.marathon.mesos. 60 IN A	10.0.3.192
+
+    ;; Query time: 1 msec
+    ;; SERVER: 198.51.100.1#53(198.51.100.1)
+    ;; WHEN: Sat Oct 15 09:19:49 UTC 2016
+    ;; MSG SIZE  rcvd: 268
+
+So we can test `green` cluster-internally, for example using the following command (executed from the Master, here): 
+    
+    core@ip-10-0-6-211 ~ $ curl green-zdd.marathon.mesos:7077/endpoint0
+    {"host": "green-zdd.marathon.mesos:7077", "version": "1.0", "result": "all is well"}
+
+Now let's say we're satisfied with `green`, all instances are healthy so we update it with while scaling back `blue` to `0` instances:
+
+    "labels": {
+      "HAPROXY_GROUP": "external",
+      "HAPROXY_0_PORT": "10080",
+      "HAPROXY_0_VHOST": "http://ec2-52-25-126-14.us-west-2.compute.amazonaws.com"
+    }
+
+As a result `green` should be available via MLB, so let's check what's going on in HAProxy now:
+
+![MLB HAProxy green](img/haproxy-green.png)
+
+Once we're done scaling down `blue` we want to verify if we can access version `1.0` of `simpleservice` from outside the cluster:
+
+    $ curl http://52.25.126.14:10080/endpoint0
+    {"host": "52.25.126.14:10080", "version": "1.0", "result": "all is well"}
+
+And indeed we can. Since the exact mechanics of the deployment orchestration are rather complex, I recommend using [zdd.py](https://github.com/mesosphere/marathon-lb#zero-downtime-deployments) a script that makes respective API calls to the DC/OS System Marathon as well as takes care of gracefully terminating instances using the HAProxy stats endpoint.
