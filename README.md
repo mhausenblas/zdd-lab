@@ -380,13 +380,19 @@ We now have a look at a canary deployment with DC/OS: we will have 3 instances s
 
 Enter [VAMP](http://vamp.io/). VAMP is a platform for managing containerized microservices, supporting canary releases, route updates, metrics collection and service discovery. Note that while VAMP is conveniently available as a [package in the DC/OS Universe](https://github.com/mesosphere/universe/tree/version-3.x/repo/packages/V/vamp/) we will install a more recent version manually in the following to address a dependencies such as Elasticsearch and Logstash better and have a finer-grained control over how we want to use VAMP.
 
-To set up VAMP, first deploy [vamp-es.json](canary/vamp-es.json), then [vamp.json](canary/vamp.json) and then [vamp-gateway.json](canary/vamp-gateway.json) either via the `dcos marathon app add` command or using the DC/OS UI. Note that in `vamp-gateway.json` you need to change the `instances` to the number of agents you have in your cluster (find that out via `dcos node`):
+You can either set up VAMP in an automated fashion, using a [DC/OS Jobs-based installer](https://gist.github.com/mhausenblas/bb967625088902874d631eaa502573cb) or manually, carrying out the following steps:
+
+1. Deploy [vamp-es.json](canary/vamp-es.json)
+1. Deploy [vamp.json](canary/vamp.json)
+1. Deploy [vamp-gateway.json](canary/vamp-gateway.json) 
+
+Deploy above either via the `dcos marathon app add` command or using the DC/OS UI and note that in `vamp-gateway.json` you need to change the `instances` to the number of agents you have in your cluster (find that out via `dcos node`):
 
     ...
     "instances": 3,
     ...
 
-Head over to `http://$PUBLIC_AGENT:8080`, in my case `http://52.25.126.14:8080/` and you should see:
+Now, head over to `http://$PUBLIC_AGENT:8080`, in my case `http://52.25.126.14:8080/` and you should see:
 
 ![VAMP idle](img/vamp-idle.png)
 
