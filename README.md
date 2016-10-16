@@ -386,7 +386,7 @@ To set up VAMP, first deploy [vamp-es.json](canary/vamp-es.json), then [vamp.jso
     "instances": 3,
     ...
 
-Head over to ``http://$PUBLIC_AGENT:8080`, in my case `http://52.25.126.14:8080/` and you should see:
+Head over to `http://$PUBLIC_AGENT:8080`, in my case `http://52.25.126.14:8080/` and you should see:
 
 ![VAMP idle](img/vamp-idle.png)
 
@@ -438,7 +438,7 @@ As well as the following under the `Gateways` tab:
 
 ![VAMP simpleservice gateways](img/vamp-gateways.png)
 
-We can now check which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script as shown in the following.
+We can now check which version clients of `simpleservice` see, using the [canary-check.sh](canary/canary-check.sh) test script as shown in the following (with the public agent, that is, `http://$PUBLIC_AGENT` as the first argument and the number of clients as the optional second argument, `10` in this case):
 
     $ ./canary-check.sh http://52.25.126.14 10
     Invoking simpleservice: 0
